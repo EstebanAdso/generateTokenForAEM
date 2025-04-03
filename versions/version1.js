@@ -262,7 +262,7 @@ function getMimeType(filePath) {
 (async () => {
   try {
     const accessToken = await getAccessToken();
-    console.log('Access Token obtenido correctamente');
+    console.log('Access Token obtenido correctamente' + '\n' + accessToken + '\n');
 
     const __dirname = path.dirname(fileURLToPath(import.meta.url));
     const imagePath = path.join(__dirname, 'prueba.png');

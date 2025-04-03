@@ -1,0 +1,47 @@
+
+showToken();
+listAssetsInPath('carpeta para mostrar');
+createFolder('nombre de carpeta', 'descripción de la carpeta', 'direcciond de la carpeta');
+uploadImage('imagen a descargar', 'ruta en donde se encuentra', true);
+deleteAsset('ruta donde esta el archivo', 'nombre del archivo');
+downloadAssetFromAEM('ruta donde esta el archivo', 'nombre del archivo', 'lugar donde lo guardaremos' , 'nombre del archivo(opcional)');
+updateImageMetadata('ruta del archivo', 'nombre del archivo', metadata a actualizar);
+copyAndRenameAsset('ruta del archivo completo', 'ruta a donde se copiara completa', 'nombre nuevo', true);
+
+
+true -> Indica que si ya existe un archivo con el mismo nombre en la ruta destino, debe ser sobrescrito.
+false -> Indica que si ya existe un archivo con el mismo nombre en la ruta destino, no debe ser sobrescrito retornara 409.
+
+
+// Ejemplo 1: Copiar y renombrar en la misma carpeta
+await copyAndRenameAsset(
+    'integraciones/astronauta.png', 
+    'integraciones', 
+    'astronauta-copia.png'
+);
+
+// Ejemplo 2: Copiar a otra carpeta con nuevo nombre
+await copyAndRenameAsset(
+    'integraciones/astronauta.png', 
+    'integraciones/nueva-carpeta', 
+    'astronauta-modificado.png'
+);
+
+// Ejemplo 3: Copiar sobrescribiendo si ya existe
+await copyAndRenameAsset(
+    'integraciones/astronauta.png', 
+    'integraciones', 
+    'astronauta-copia.png',
+    true // overwrite
+);
+
+
+exp (Expiración): 
+
+iss (Emisor): credentials.orgId → Tu Organization ID de Adobe (ej: 12345@AdobeOrg).
+
+sub (Sujeto): credentials.technicalAccountId → Technical Account ID (ej: techacct@adobe.com).
+
+aud (Audiencia): ${credentials.imsEndpoint}/c/${credentials.clientId} → URL de IMS + tu Client ID.
+
+Claim Adobe: 'https://ims-na1.../ent_aem_cloud_api': true → Permiso para usar AEM API.
