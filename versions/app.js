@@ -444,8 +444,8 @@ main().catch(console.error);
 
 // showToken();
 // createFolder('Prueba', 'Esta es la descripción realizada en js', 'integraciones');
-// uploadImage('astronaut.png', 'integraciones', true);
-// deleteAsset('integraciones', 'Prueba');
+// uploadImage('../astronaut.png', 'integraciones', true);
+// deleteAsset('integraciones', 'astronaut.png');
 // listAssetsInPath('integraciones/astronaut.png');
 // downloadAssetFromAEM('integraciones', 'astronaut.png', './' , 'pruebaNode.png');
 // updateImageMetadata('integraciones', 'astronaut.png', metadata);

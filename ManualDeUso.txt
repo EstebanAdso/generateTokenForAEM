@@ -45,3 +45,8 @@ sub (Sujeto): credentials.technicalAccountId → Technical Account ID (ej: techa
 aud (Audiencia): ${credentials.imsEndpoint}/c/${credentials.clientId} → URL de IMS + tu Client ID.
 
 Claim Adobe: 'https://ims-na1.../ent_aem_cloud_api': true → Permiso para usar AEM API.
+
+Mejoras por realizar
+* buscar por metadatos.
+* subir mas de un archivo a la vez.
+* manejo de errores.

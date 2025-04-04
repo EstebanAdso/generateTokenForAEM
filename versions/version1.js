@@ -265,10 +265,10 @@ function getMimeType(filePath) {
     console.log('Access Token obtenido correctamente' + '\n' + accessToken + '\n');
 
     const __dirname = path.dirname(fileURLToPath(import.meta.url));
-    const imagePath = path.join(__dirname, 'prueba.png');
+    const imagePath = path.join(__dirname, '../astronaut.png');
 
     if (fs.existsSync(imagePath)) {
-      console.log('Subiendo imagen prueba.png...');
+      console.log('Subiendo imagen astronaut.png...');
       await uploadImage(
         imagePath,
         'integraciones', // Carpeta destino en AEM
@@ -285,4 +285,4 @@ function getMimeType(filePath) {
   }
 })();
 
-createFolder('folderTest7', 'prueba', 'integraciones');
+// createFolder('folderTest7', 'prueba', 'integraciones');
