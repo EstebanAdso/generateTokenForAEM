@@ -1,78 +1,38 @@
 import 'dotenv/config';
 import express from 'express';
-import jwt from 'jsonwebtoken';
 import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
 import multer from 'multer';
 import bodyParser from 'body-parser';
+import credentials, {getAccessToken } from './helpers/credentials.js';
 
 // Configuración de Express
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Configuración de multer para manejar la subida de archivos
-const upload = multer({ dest: 'uploads/' });
+// Configuración de multer para almacenamiento temporal
+const upload = multer({
+    storage: multer.diskStorage({
+      destination: (req, file, cb) => {
+        const tempDir = './temp_uploads';
+        if (!fs.existsSync(tempDir)) {
+          fs.mkdirSync(tempDir, { recursive: true });
+        }
+        cb(null, tempDir);
+      },
+      filename: (req, file, cb) => {
+        // Mantener el nombre original del archivo
+        cb(null, file.originalname);
+      }
+    })
+  });
+
 
 // Middleware
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// Configuración de credenciales
-const credentials = {
-    clientId: process.env.CLIENT_ID,
-    clientSecret: process.env.CLIENT_SECRET,
-    technicalAccountId: process.env.TECHNICAL_ACCOUNT_ID,
-    orgId: process.env.ORG_ID,
-    privateKey: process.env.PRIVATE_KEY,
-    imsEndpoint: process.env.IMS_ENDPOINT,
-};
-const instancia_aem = process.env.INSTANCIA_AEM;
-
-// Generar JWT
-function generateJWT() {
-    const payload = {
-        exp: Math.floor(Date.now() / 1000) + 60 * 60, // 1 hora de expiración
-        iss: credentials.orgId,
-        sub: credentials.technicalAccountId,
-        aud: `${credentials.imsEndpoint}/c/${credentials.clientId}`,
-        'https://ims-na1.adobelogin.com/s/ent_aem_cloud_api': true,
-    };
-
-    return jwt.sign(payload, credentials.privateKey, {
-        algorithm: 'RS256',
-        header: {
-            'cache-control': 'no-cache',
-            'content-type': 'application/x-www-form-urlencoded',
-        },
-    });
-}
-
-// Obtener access token
-async function getAccessToken() {
-    try {
-        const jwtToken = generateJWT();
-
-        const response = await axios.post(
-            `${credentials.imsEndpoint}/ims/exchange/jwt`,
-            new URLSearchParams({
-                client_id: credentials.clientId,
-                client_secret: credentials.clientSecret,
-                jwt_token: jwtToken,
-            }),
-            {
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-            }
-        );
-
-        return response.data.access_token;
-    } catch (error) {
-        console.error('Error obteniendo token:', error.response?.data || error.message);
-        throw error;
-    }
-}
 
 // Función auxiliar para determinar el MIME type
 function getMimeType(filePath) {
@@ -90,122 +50,11 @@ function getMimeType(filePath) {
     return mimeTypes[extension] || 'application/octet-stream';
 }
 
-// Función auxiliar para iniciar la subida
-async function initiateUpload(accessToken, fileName, fileSize, targetFolder) {
-    try {
-        const initiateURL = `${instancia_aem}/content/dam/${targetFolder}.initiateUpload.json`;
-
-        const response = await axios.post(
-            initiateURL,
-            new URLSearchParams({
-                fileName: fileName,
-                fileSize: fileSize.toString(),
-            }),
-            {
-                headers: {
-                    Authorization: `Bearer ${accessToken}`,
-                    'x-api-key': credentials.clientId,
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-            }
-        );
-
-        const uploadURIs = response.data.files[0].uploadURIs;
-        const uploadToken = response.data.files[0].uploadToken;
-        const completeURI = response.data.completeURI;
-
-        return { uploadURIs, uploadToken, completeURI };
-    } catch (error) {
-        if (error.response && error.response.status === 404) {
-            console.log('Carpeta no encontrada, intentando crearla...');
-            await createFolder(
-                targetFolder.split('/').pop(),
-                targetFolder.split('/').pop(),
-                targetFolder
-            );
-
-            return initiateUpload(accessToken, fileName, fileSize, targetFolder);
-        }
-        throw error;
-    }
-}
-
-// Función auxiliar para subir las partes del binario
-async function uploadBinaryParts(filePath, uploadURIs, fileSize) {
-    try {
-        const fileData = fs.readFileSync(filePath);
-        const uploadURI = uploadURIs[0];
-
-        await axios.put(uploadURI, fileData, {
-            headers: {
-                'Content-Type': 'application/octet-stream',
-                'Content-Length': fileSize.toString(),
-                'x-ms-blob-type': 'BlockBlob',
-            },
-            maxContentLength: Infinity,
-            maxBodyLength: Infinity,
-        });
-    } catch (error) {
-        console.error('Error subiendo parte binaria:', error);
-        throw error;
-    }
-}
-
-// Función auxiliar para completar la subida
-async function completeUpload(accessToken, completeURI, fileData) {
-    const completeURL = `${instancia_aem}${completeURI}`;
-
-    const formData = new URLSearchParams();
-    formData.append('fileName', fileData.fileName);
-    formData.append('mimeType', fileData.mimeType);
-    formData.append('uploadToken', fileData.uploadToken);
-    formData.append('fileSize', fileData.fileSize.toString());
-
-    if (fileData.createVersion !== undefined) {
-        formData.append('createVersion', fileData.createVersion.toString());
-    }
-    if (fileData.replace !== undefined) {
-        formData.append('replace', fileData.replace.toString());
-    }
-
-    const response = await axios.post(
-        completeURL,
-        formData,
-        {
-            headers: {
-                Authorization: `Bearer ${accessToken}`,
-                'x-api-key': credentials.clientId,
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-        }
-    );
-
-    return response;
-}
-
-// Rutas del API
-
-// 1. Ruta para obtener token
-app.get('/api/token', async (req, res) => {
+// Función para crear carpeta
+async function createFolder(nombre, title, direction) {
     try {
         const accessToken = await getAccessToken();
-        res.json({ accessToken });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// 2. Ruta para crear carpeta
-app.post('/api/folders', async (req, res) => {
-    try {
-        const { nombre, title, direccion } = req.body;
-        
-        if (!nombre || !title || !direccion) {
-            return res.status(400).json({ error: 'Faltan parámetros requeridos: nombre, title, direccion' });
-        }
-
-        const accessToken = await getAccessToken();
-        const aemURL = `${instancia_aem}/api/assets/${direccion}/*`;
+        const aemURL = `${credentials.instancia_aem}/api/assets/${direction}/*`;
 
         const response = await axios.post(
             aemURL,
@@ -224,75 +73,289 @@ app.post('/api/folders', async (req, res) => {
                 },
             }
         );
-        
-        res.json({ message: 'Carpeta creada exitosamente', data: response.data });
+        console.log('Carpeta creada: ' + nombre);
+        return response.data;
     } catch (error) {
         if (error.response?.status === 409) {
-            return res.status(409).json({ message: 'Carpeta ya existente' });
+            console.log('Carpeta ya existente');
+            return;
         }
         console.error('Error creando carpeta:', error);
+        throw error;
+    }
+}
+
+// Función para subir una imagen
+async function uploadImage(filePaths, targetFolder, options = {}) {
+    try {
+        const accessToken = await getAccessToken();
+
+        // Paso 1: Iniciar la subida para todos los archivos
+        const initiateResponse = await initiateMultiUpload(
+            accessToken,
+            filePaths,
+            targetFolder
+        );
+
+        const { uploadData, completeURI } = initiateResponse;
+
+        // Paso 2: Subir los binarios de cada archivo
+        for (const data of uploadData) {
+            await uploadBinaryParts(
+                data.filePath,
+                data.uploadURIs,
+                data.fileSize,
+                data.minPartSize,
+                data.maxPartSize
+            );
+        }
+
+        // Paso 3: Completar la subida para todos los archivos
+        const completeResponse = await completeMultiUpload(
+            accessToken,
+            completeURI,
+            uploadData.map(data => ({
+                fileName: path.basename(data.filePath),
+                mimeType: getMimeType(data.filePath),
+                uploadToken: data.uploadToken,
+                fileSize: data.fileSize,
+                ...options
+            }))
+        );
+
+        console.log('Imágenes subidas exitosamente:', completeResponse.data);
+        return completeResponse.data;
+    } catch (error) {
+        console.error('Error subiendo imágenes:', error.response?.data || error.message);
+        throw error;
+    }
+}
+
+async function initiateMultiUpload(accessToken, filePaths, targetFolder) {
+    try {
+        const initiateURL = `${credentials.instancia_aem}/content/dam/${targetFolder}.initiateUpload.json`;
+        
+        // Preparar los datos para la solicitud
+        const formData = new URLSearchParams();
+        filePaths.forEach((filePath, index) => {
+            const fileName = path.basename(filePath);
+            const fileSize = fs.statSync(filePath).size;
+            
+            formData.append(`fileName`, fileName);
+            formData.append(`fileSize`, fileSize.toString());
+        });
+
+        const response = await axios.post(
+            initiateURL,
+            formData,
+            {
+                headers: {
+                    Authorization: `Bearer ${accessToken}`,
+                    'x-api-key': credentials.clientId,
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+            }
+        );
+
+        // Preparar los datos de subida para cada archivo
+        const uploadData = filePaths.map((filePath, index) => {
+            const fileInfo = response.data.files[index];
+            return {
+                filePath,
+                fileName: fileInfo.fileName,
+                fileSize: fs.statSync(filePath).size,
+                mimeType: getMimeType(filePath),
+                uploadURIs: fileInfo.uploadURIs,
+                uploadToken: fileInfo.uploadToken,
+                minPartSize: fileInfo.minPartSize,
+                maxPartSize: fileInfo.maxPartSize
+            };
+        });
+
+        return {
+            uploadData,
+            completeURI: response.data.completeURI
+        };
+    } catch (error) {
+        if (error.response && error.response.status === 404) {
+            console.log('Carpeta no encontrada, intentando crearla...');
+            const folderName = targetFolder.split('/').pop();
+            await createFolder(folderName, folderName, targetFolder);
+            return initiateMultiUpload(accessToken, filePaths, targetFolder);
+        }
+        throw error;
+    }
+}
+
+async function uploadBinaryParts(filePath, uploadURIs, fileSize, minPartSize, maxPartSize) {
+    try {
+        // Leer el archivo como un Buffer
+        const fileData = fs.readFileSync(filePath);
+        
+        // Configuración de headers
+        const headers = {
+            'Content-Type': 'application/octet-stream',
+            'Content-Length': fileSize.toString(),
+            'x-ms-blob-type': 'BlockBlob'
+        };
+
+        // Si el archivo es pequeño, subirlo todo de una vez
+        if (fileSize <= maxPartSize) {
+            await axios.put(uploadURIs[0], fileData, {
+                headers: headers,
+                maxContentLength: Infinity,
+                maxBodyLength: Infinity
+            });
+            return;
+        }
+
+        // Para archivos grandes, dividir en partes
+        const chunkSize = maxPartSize;
+        let offset = 0;
+        
+        while (offset < fileSize) {
+            const end = Math.min(offset + chunkSize, fileSize);
+            const chunk = fileData.slice(offset, end);
+            const partNumber = Math.floor(offset / chunkSize);
+            
+            await axios.put(uploadURIs[partNumber], chunk, {
+                headers: {
+                    ...headers,
+                    'Content-Length': (end - offset).toString()
+                },
+                maxContentLength: Infinity,
+                maxBodyLength: Infinity
+            });
+
+            offset = end;
+            console.log(`Subido ${offset} de ${fileSize} bytes (${Math.round((offset / fileSize) * 100)}%)`);
+        }
+    } catch (error) {
+        console.error('Error subiendo parte binaria:', error);
+        throw error;
+    }
+}
+
+async function completeMultiUpload(accessToken, completeURI, filesData) {
+    const completeURL = `${credentials.instancia_aem}${completeURI}`;
+    
+    // Procesar cada archivo individualmente
+    const results = [];
+    for (const fileData of filesData) {
+        const formData = new URLSearchParams();
+        formData.append('fileName', fileData.fileName);
+        formData.append('mimeType', fileData.mimeType);
+        formData.append('uploadToken', fileData.uploadToken);
+        formData.append('fileSize', fileData.fileSize.toString());
+
+        if (fileData.replace !== undefined) {
+            formData.append('replace', fileData.replace.toString());
+        }
+
+        try {
+            const response = await axios.post(
+                completeURL,
+                formData,
+                {
+                    headers: {
+                        Authorization: `Bearer ${accessToken}`,
+                        'x-api-key': credentials.clientId,
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                }
+            );
+            results.push(response.data);
+            console.log(`Subida completada para: ${fileData.fileName}`);
+        } catch (error) {
+            console.error(`Error completando subida para ${fileData.fileName}:`, error.response?.data || error.message);
+            results.push({ error: error.message, fileName: fileData.fileName });
+        }
+    }
+
+    return { data: results };
+}
+
+// Rutas del API
+// 1. Ruta para obtener token
+app.get('/api/token', async (req, res) => {
+    try {
+        const accessToken = await getAccessToken();
+        res.json({ accessToken });
+    } catch (error) {
         res.status(500).json({ error: error.message });
     }
 });
 
-// 3. Ruta para subir imagen (con multer para manejar la subida de archivos)
-app.post('/api/assets/upload', upload.single('file'), async (req, res) => {
+// 2. Ruta para crear carpeta
+app.post('/api/folders', async (req, res) => {
     try {
-        if (!req.file) {
-            return res.status(400).json({ error: 'No se proporcionó ningún archivo' });
+        const { nombre, title, direction } = req.body;
+        
+        if (!nombre || !title || !direction) {
+            return res.status(400).json({ error: 'Faltan parámetros requeridos: nombre, title, direction' });
         }
 
-        const { targetFolder, replace } = req.body;
-        if (!targetFolder) {
-            return res.status(400).json({ error: 'Falta el parámetro targetFolder' });
-        }
-
-        const filePath = req.file.path;
-        const fileName = req.file.originalname;
-        const fileSize = req.file.size;
-        const mimeType = req.file.mimetype;
-
-        const accessToken = await getAccessToken();
-
-        // Paso 1: Iniciar la subida
-        const initiateResponse = await initiateUpload(
-            accessToken,
-            fileName,
-            fileSize,
-            targetFolder
-        );
-
-        const { uploadURIs, uploadToken, completeURI } = initiateResponse;
-
-        // Paso 2: Subir el binario en partes
-        await uploadBinaryParts(filePath, uploadURIs, fileSize);
-
-        // Paso 3: Completar la subida
-        const completeResponse = await completeUpload(
-            accessToken,
-            completeURI,
-            {
-                fileName,
-                mimeType,
-                uploadToken,
-                fileSize,
-                replace: replace === 'true'
-            }
-        );
-
-        // Eliminar el archivo temporal
-        fs.unlinkSync(filePath);
-
-        res.json({ 
-            message: 'Imagen subida exitosamente', 
-            data: completeResponse.data 
-        });
+        await createFolder(nombre, title, direction);
+        res.json({ message: 'Carpeta creada exitosamente' });
     } catch (error) {
-        console.error('Error subiendo imagen:', error);
-        if (req.file) {
-            fs.unlinkSync(req.file.path);
+        if (error.response?.status === 409) {
+            return res.status(409).json({ message: 'Carpeta ya existente' });
         }
         res.status(500).json({ error: error.message });
+    }
+});
+
+// 3. Ruta para subir imágenes
+app.post('/api/upload/:targetFolder', upload.array('files'), async (req, res) => {
+    try {
+        const { targetFolder } = req.params;
+        const { replace } = req.query;
+        const files = req.files;
+
+        if (!files || files.length === 0) {
+            return res.status(400).json({ error: 'No se proporcionaron archivos para subir' });
+        }
+
+        // Convertir los archivos subidos al formato que espera la función uploadImage
+        const filePaths = files.map(file => file.path);
+
+        // Usar la función original de uploadImage
+        const result = await uploadImage(filePaths, targetFolder, { replace: replace === 'true' });
+
+        // Limpiar archivos temporales
+        files.forEach(file => {
+            try {
+                fs.unlinkSync(file.path);
+            } catch (err) {
+                console.error('Error al eliminar archivo temporal:', err);
+            }
+        });
+
+        res.json({
+            success: true,
+            message: 'Imágenes subidas exitosamente',
+            data: result
+        });
+    } catch (error) {
+        // Limpiar archivos temporales en caso de error
+        if (req.files) {
+            req.files.forEach(file => {
+                try {
+                    if (fs.existsSync(file.path)) {
+                        fs.unlinkSync(file.path);
+                    }
+                } catch (err) {
+                    console.error('Error al eliminar archivo temporal:', err);
+                }
+            });
+        }
+
+        const statusCode = error.response?.status || 500;
+        res.status(statusCode).json({
+            success: false,
+            message: 'Error al subir imágenes',
+            error: error.response?.data || error.message
+        });
     }
 });
 
@@ -302,7 +365,7 @@ app.delete('/api/assets/:path/:name', async (req, res) => {
         const { path: assetPath, name } = req.params;
         
         const accessToken = await getAccessToken();
-        const deleteURL = `${instancia_aem}/api/assets/${assetPath}/${name}`;
+        const deleteURL = `${credentials.instancia_aem}/api/assets/${assetPath}/${name}`;
         
         const response = await axios.delete(deleteURL, {
             headers: {
@@ -313,8 +376,8 @@ app.delete('/api/assets/:path/:name', async (req, res) => {
         
         res.json({ message: 'Asset eliminado exitosamente', data: response.data });
     } catch (error) {
-        console.error('Error eliminando asset:', error);
-        res.status(500).json({ error: error.message });
+        const statusCode = error.response?.status || 500;
+        res.status(statusCode).json({ error: error.response?.data || error.message });
     }
 });
 
@@ -324,7 +387,7 @@ app.get('/api/assets/:path', async (req, res) => {
         const { path: assetPath } = req.params;
         
         const accessToken = await getAccessToken();
-        const listURL = `${instancia_aem}/api/assets/${assetPath}.json`;
+        const listURL = `${credentials.instancia_aem}/api/assets/${assetPath}.json`;
         
         const response = await axios.get(listURL, {
             headers: {
@@ -338,8 +401,8 @@ app.get('/api/assets/:path', async (req, res) => {
             data: response.data 
         });
     } catch (error) {
-        console.error('Error listando assets:', error);
-        res.status(500).json({ error: error.message });
+        const statusCode = error.response?.status || 500;
+        res.status(statusCode).json({ error: error.response?.data || error.message });
     }
 });
 
@@ -350,7 +413,7 @@ app.get('/api/assets/download/:aemPath/:fileName', async (req, res) => {
         const { newFileName } = req.query;
         
         const accessToken = await getAccessToken();
-        const downloadUrl = `${instancia_aem}/api/assets/${aemPath}/${fileName}/renditions/original`;
+        const downloadUrl = `${credentials.instancia_aem}/api/assets/${aemPath}/${fileName}/renditions/original`;
         
         const response = await axios.get(downloadUrl, {
             headers: {
@@ -368,8 +431,8 @@ app.get('/api/assets/download/:aemPath/:fileName', async (req, res) => {
         // Pipe del stream de respuesta al response de Express
         response.data.pipe(res);
     } catch (error) {
-        console.error('Error al descargar la imagen:', error);
-        res.status(500).json({ error: error.message });
+        const statusCode = error.response?.status || 500;
+        res.status(statusCode).json({ error: error.response?.data || error.message });
     }
 });
 
@@ -384,7 +447,7 @@ app.put('/api/assets/metadata/:aemPath/:fileName', async (req, res) => {
         }
         
         const accessToken = await getAccessToken();
-        const updateUrl = `${instancia_aem}/api/assets/${aemPath}/${fileName}`;
+        const updateUrl = `${credentials.instancia_aem}/api/assets/${aemPath}/${fileName}`;
         
         const response = await axios.put(updateUrl, metadata, {
             headers: {
@@ -399,8 +462,8 @@ app.put('/api/assets/metadata/:aemPath/:fileName', async (req, res) => {
             data: response.data 
         });
     } catch (error) {
-        console.error('Error al actualizar los metadatos:', error);
-        res.status(500).json({ error: error.message });
+        const statusCode = error.response?.status || 500;
+        res.status(statusCode).json({ error: error.response?.data || error.message });
     }
 });
 
@@ -416,8 +479,8 @@ app.post('/api/assets/copy', async (req, res) => {
         }
         
         const accessToken = await getAccessToken();
-        const sourceUrl = `${instancia_aem}/api/assets/${sourcePath}`;
-        const destinationUrl = `${instancia_aem}/api/assets/${targetPath}/${newName}`;
+        const sourceUrl = `${credentials.instancia_aem}/api/assets/${sourcePath}`;
+        const destinationUrl = `${credentials.instancia_aem}/api/assets/${targetPath}/${newName}`;
         
         const response = await axios({
             method: 'COPY',
@@ -435,8 +498,8 @@ app.post('/api/assets/copy', async (req, res) => {
             data: response.data 
         });
     } catch (error) {
-        console.error('Error al copiar y renombrar el asset:', error);
-        res.status(500).json({ error: error.message });
+        const statusCode = error.response?.status || 500;
+        res.status(statusCode).json({ error: error.response?.data || error.message });
     }
 });
 
