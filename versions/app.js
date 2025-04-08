@@ -302,6 +302,10 @@ async function deleteAsset(path, name) {
 }
 
 async function showToken() {
+
+    const token = generateJWT()
+    console.log('\n' + '------Token obtenido correctamente:------' + '\n' + token + '\n')
+
     const accessToken = await getAccessToken();
     console.log('\n' + '------Access Token obtenido correctamente:------' + '\n' + accessToken + '\n');
 }
@@ -420,19 +424,20 @@ async function copyAndRenameAsset(sourcePath, targetPath, newName, overwrite = f
         throw error;
     }
 }
+
+
 main().catch(console.error);
 
 
-showToken();
+// showToken();
 // createFolder('Prueba', 'Esta es la descripción realizada en js', 'integraciones');
-// uploadImage('./astronaut.png', 'integraciones');
+// uploadImage('./images/astronaut.png', 'integraciones');
 // await uploadImage(
-//     ['./astronaut.png', './astronaut2.png', './astronaut3.png'],
+//     ['./images/astronaut.png', './images/astronaut2.png', './images/astronaut3.png'],
 //     'integraciones',
 // );
 // deleteAsset('integraciones', 'astronaut.png');
 // listAssetsInPath('integraciones/astronaut2.png');
 // downloadAssetFromAEM('integraciones', 'astronaut.png', './' , 'pruebaNode.png');
-// updateImageMetadata('integraciones', 'astronaut2.png', metadata);
+// updateImageMetadata('integraciones', 'astronaut.png', metadata);
 // copyAndRenameAsset('integraciones/astronaut.png', 'integraciones', 'astronauta-copia.png', true);
-
