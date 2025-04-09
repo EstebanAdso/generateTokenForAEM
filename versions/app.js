@@ -388,6 +388,10 @@ async function updateImageMetadata(aemPath, fileName, metadata) {
             console.log('Asset no encontrado en la ruta para actualizar: '+  aemPath)
             return
         }
+        if(error.response?.status === 423){
+            console.log('Asset bloqueado en la ruta para actualizar: '+  aemPath)
+            return
+        }
 
         console.error('Error al actualizar los metadatos:', error.response?.data || error.message);
         throw error;
@@ -425,6 +429,24 @@ async function copyAndRenameAsset(sourcePath, targetPath, newName, overwrite = f
     }
 }
 
+async function searchAssetsWithMetadata(propery, value) {
+    try {
+        const accessToken = await getAccessToken();
+        const searchUrl = `${credentials.instancia_aem}/bin/querybuilder.json?path=/content/dam&type=dam:Asset&property=${propery}&property.value=${value}&p.limit=-1`;
+        const response = await axios.get(searchUrl, {
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+                'x-api-key': credentials.clientId
+            }
+        });
+        console.log('Assets encontrados:', response.data);
+        return response.data;
+    } catch (error) {
+        console.error('Error al buscar el metadato:', error.response?.data || error.message);
+        throw error;
+    }  
+}
+
 
 main().catch(console.error);
 
@@ -439,5 +461,6 @@ main().catch(console.error);
 // deleteAsset('integraciones', 'astronaut.png');
 // listAssetsInPath('integraciones/astronaut.png');
 // downloadAssetFromAEM('integraciones', 'astronaut.png', './' , 'pruebaNode.png');
-updateImageMetadata('integraciones', 'astronaut.png', astronautMetadata);
+// updateImageMetadata('integraciones', 'astronaut.png', astronautMetadata);
 // copyAndRenameAsset('integraciones/astronaut.png', 'integraciones', 'astronauta-copia.png', true);
+// searchAssetsWithMetadata('jcr:content/metadata/dc:title', 'Planeta Saturno');
