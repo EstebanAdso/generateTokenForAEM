@@ -3,7 +3,7 @@ import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
 import credentials, { generateJWT, getAccessToken } from '../helpers/credentials.js';
-import metadata from '../helpers/metadata.js';
+import { astronautMetadata, earthMetadata, marsMetadata } from '../helpers/metadata.js';
 
 // Función para crear carpeta
 async function createFolder(nombre, title, direccion) {
@@ -433,11 +433,11 @@ main().catch(console.error);
 // createFolder('Prueba', 'Esta es la descripción realizada en js', 'integraciones');
 // uploadImage('./images/astronaut.png', 'integraciones');
 // await uploadImage(
-//     ['./images/astronaut.png', './images/astronaut2.png', './images/astronaut3.png'],
+//     ['./images/astronaut.png', './images/earth.png', './images/mars.png'],
 //     'integraciones',
 // );
 // deleteAsset('integraciones', 'astronaut.png');
-// listAssetsInPath('integraciones/astronaut2.png');
+// listAssetsInPath('integraciones/astronaut.png');
 // downloadAssetFromAEM('integraciones', 'astronaut.png', './' , 'pruebaNode.png');
-// updateImageMetadata('integraciones', 'astronaut.png', metadata);
+updateImageMetadata('integraciones', 'astronaut.png', astronautMetadata);
 // copyAndRenameAsset('integraciones/astronaut.png', 'integraciones', 'astronauta-copia.png', true);
