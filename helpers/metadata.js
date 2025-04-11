@@ -4,7 +4,7 @@ export const astronautMetadata = {
     "properties": {
         "dc:title": "Astronauta",
         "dc:description": "Fotografía de astronauta flotando en la estación espacial internacional",
-        "dc:creator": "NASA2",
+        "dc:creator": "NASA",
         "dc:rights": "Copyright © 2023 NASA/Roscosmos - Uso permitido con atribución",
         "dc:subject": [
             "astronauta",
@@ -28,7 +28,9 @@ export const astronautMetadata = {
                 "properties:orientation/landscape",
                 "properties:color/color",
                 "properties:imageType/photograph"
-            ]
+            ],
+            "dc:creator": "NASA",
+            "dc:rights": "Copyright © 2025 NASA/Roscosmos - Uso permitido con atribución",
         },
         "related": {
             "missions": ["ISS-63"],

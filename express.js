@@ -73,16 +73,29 @@ async function createFolder(nombre, title, direction) {
                 },
             }
         );
+
+
         console.log('Carpeta creada: ' + nombre);
         return response.data;
     } catch (error) {
-        if (error.response?.status === 409) {
+        const props = error.response?.data?.properties;
+        const statusMessage = props?.["status.message"] || '';
+    
+        if (error.response?.status === 409 && statusMessage.includes('already exist')) {
             console.log('Carpeta ya existente');
-            return;
+            throw new Error('Carpeta ya existente');
         }
-        console.error('Error creando carpeta:', error);
-        throw error;
+    
+        if (error.response?.status === 409 && statusMessage.includes('parent does not exist')) {
+            console.log('Ruta no encontrada');
+            throw new Error('Ruta no encontrada');
+        }
+    
+        console.error('Error desconocido:', error.response?.data || error.message);
+        throw new Error('Error al crear carpeta');
     }
+    
+    
 }
 
 // Función para subir una imagen
@@ -126,6 +139,9 @@ async function uploadImage(filePaths, targetFolder, options = {}) {
         console.log('Imágenes subidas exitosamente:', completeResponse.data);
         return completeResponse.data;
     } catch (error) {
+        if (error.response?.status === 404) {
+            throw new Error('Carpeta no encontrada');
+        }
         console.error('Error subiendo imágenes:', error.response?.data || error.message);
         throw error;
     }
@@ -275,6 +291,26 @@ async function completeMultiUpload(accessToken, completeURI, filesData) {
     return { data: results };
 }
 
+async function searchAssetsWithMetadata(property, value) {
+    try {
+        const accessToken = await getAccessToken();
+        const searchUrl = `${credentials.instancia_aem}/bin/querybuilder.json?path=/content/dam&type=dam:Asset&property=${property}&property.value=${value}&p.limit=-1`;
+        const response = await axios.get(searchUrl, {
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+                'x-api-key': credentials.clientId
+            }
+        });
+        console.log('Assets encontrados:', response.data);
+        return response.data;
+    } catch (error) {
+        console.error('Error al buscar el metadato:', error.response?.data || error.message);
+        throw error;
+    }  
+}
+
+
+
 // Rutas del API
 // 1. Ruta para obtener token
 app.get('/api/token', async (req, res) => {
@@ -296,17 +332,15 @@ app.post('/api/folders', async (req, res) => {
         }
 
         await createFolder(nombre, title, direction);
+
         res.json({ message: 'Carpeta creada exitosamente' });
     } catch (error) {
-        if (error.response?.status === 409) {
-            return res.status(409).json({ message: 'Carpeta ya existente' });
-        }
         res.status(500).json({ error: error.message });
     }
 });
 
 // 3. Ruta para subir imágenes
-app.post('/api/upload/:targetFolder', upload.array('files'), async (req, res) => {
+app.post('/api/upload/:targetFolder(*)', upload.array('files'), async (req, res) => {
     try {
         const { targetFolder } = req.params;
         const { replace } = req.query;
@@ -376,13 +410,18 @@ app.delete('/api/assets/:path/:name', async (req, res) => {
         
         res.json({ message: 'Asset eliminado exitosamente', data: response.data });
     } catch (error) {
+        if(error.response.status === 404){
+            console.log('ruta no encontrada');
+            return res.status(404).json({ error: 'Ruta no encontrada' });
+        }
+
         const statusCode = error.response?.status || 500;
         res.status(statusCode).json({ error: error.response?.data || error.message });
     }
 });
 
 // 5. Ruta para listar assets en un path
-app.get('/api/assets/:path', async (req, res) => {
+app.get('/api/assets/:path(*)', async (req, res) => {
     try {
         const { path: assetPath } = req.params;
         
@@ -401,19 +440,24 @@ app.get('/api/assets/:path', async (req, res) => {
             data: response.data 
         });
     } catch (error) {
+        if(error.response.status === 404){
+            res.status(404).json({message: "Ruta no encontrada para listar."})
+            return
+        }
+
         const statusCode = error.response?.status || 500;
         res.status(statusCode).json({ error: error.response?.data || error.message });
     }
 });
 
 // 6. Ruta para descargar un asset
-app.get('/api/assets/download/:aemPath/:fileName', async (req, res) => {
+app.get('/api/download/:aemPath(*)', async (req, res) => {
     try {
-        const { aemPath, fileName } = req.params;
+        const { aemPath} = req.params;
         const { newFileName } = req.query;
         
         const accessToken = await getAccessToken();
-        const downloadUrl = `${credentials.instancia_aem}/api/assets/${aemPath}/${fileName}/renditions/original`;
+        const downloadUrl = `${credentials.instancia_aem}/api/assets/${aemPath}/renditions/original`;
         
         const response = await axios.get(downloadUrl, {
             headers: {
@@ -424,22 +468,25 @@ app.get('/api/assets/download/:aemPath/:fileName', async (req, res) => {
         });
         
         // Configurar headers para la descarga
-        const finalFileName = newFileName || fileName;
+        const finalFileName = newFileName || path.basename(aemPath);
         res.setHeader('Content-Disposition', `attachment; filename="${finalFileName}"`);
         res.setHeader('Content-Type', response.headers['content-type']);
         
         // Pipe del stream de respuesta al response de Express
         response.data.pipe(res);
-    } catch (error) {
-        const statusCode = error.response?.status || 500;
-        res.status(statusCode).json({ error: error.response?.data || error.message });
-    }
+    }catch (error) {
+            const statusCode = error.response?.status || 500;
+            const errorMessage = error.response?.data?.message || error.message || 'Error desconocido';
+        
+            // Solo devuelve el mensaje de error, evita serializar el objeto completo
+            res.status(statusCode).json({ error: errorMessage + ' Asegurate de seleccionar un asset y no una carpeta' });
+        }
 });
 
 // 7. Ruta para actualizar metadatos de un asset
-app.put('/api/assets/metadata/:aemPath/:fileName', async (req, res) => {
+app.put('/api/update/metadata/:aemPath(*)', async (req, res) => {
     try {
-        const { aemPath, fileName } = req.params;
+        const { aemPath} = req.params;
         const metadata = req.body;
         
         if (!metadata) {
@@ -447,7 +494,7 @@ app.put('/api/assets/metadata/:aemPath/:fileName', async (req, res) => {
         }
         
         const accessToken = await getAccessToken();
-        const updateUrl = `${credentials.instancia_aem}/api/assets/${aemPath}/${fileName}`;
+        const updateUrl = `${credentials.instancia_aem}/api/assets/${aemPath}`;
         
         const response = await axios.put(updateUrl, metadata, {
             headers: {
@@ -462,6 +509,10 @@ app.put('/api/assets/metadata/:aemPath/:fileName', async (req, res) => {
             data: response.data 
         });
     } catch (error) {
+        if(error.response.status === 404){
+            res.status(404).json({message: "Ruta no encontrada para actualizar."})
+            return
+        }
         const statusCode = error.response?.status || 500;
         res.status(statusCode).json({ error: error.response?.data || error.message });
     }
@@ -494,14 +545,75 @@ app.post('/api/assets/copy', async (req, res) => {
         });
         
         res.json({ 
-            message: 'Asset copiado y renombrado exitosamente', 
-            data: response.data 
+            message: 'Asset copiado y renombrado exitosamente'
         });
     } catch (error) {
+        if(error.response.status === 404){
+            res.status(404).json({message: "Ruta no encontrada para copiar."})
+            return
+        }
         const statusCode = error.response?.status || 500;
         res.status(statusCode).json({ error: error.response?.data || error.message });
     }
 });
+
+// 9. Ruta para buscar assets por metadato
+app.get('/api/search/metadata', async (req, res) => {
+    try {
+        const { property, value } = req.query;
+        
+        if (!property || !value) {
+            return res.status(400).json({
+                success: false,
+                message: 'Ambos campos son requeridos'
+            });
+        }
+
+        const results = await searchAssetsWithMetadata(property, value);
+        
+        res.json({
+            success: true,
+            data: results
+        });
+    } catch (error) {
+        console.error('Error in search route:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error searching assets',
+            error: error.message
+        });
+    }
+});
+
+// 10. Ruta para listar todos los metadatos de un asset
+app.get('/api/get/metadata/:path(*)', async (req, res) => {
+    try {
+        const { path: assetPath } = req.params;
+        
+        const accessToken = await getAccessToken();
+        const listURL = `${credentials.instancia_aem}/content/dam/${assetPath}.infinity.json`;
+        
+        const response = await axios.get(listURL, {
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+                'x-api-key': credentials.clientId
+            },
+        });
+        
+        res.json({ 
+            message: 'Assets listados exitosamente', 
+            data: response.data 
+        });
+    } catch (error) {
+        if(error.response.status === 404){
+            res.status(404).json({message: "Ruta no encontrada."})
+            return
+        }
+        const statusCode = error.response?.status || 500;
+        res.status(statusCode).json({ error: error.response?.data || error.message });
+    }
+});
+
 
 // Iniciar el servidor
 app.listen(port, () => {

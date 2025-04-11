@@ -429,10 +429,10 @@ async function copyAndRenameAsset(sourcePath, targetPath, newName, overwrite = f
     }
 }
 
-async function searchAssetsWithMetadata(propery, value) {
+async function searchAssetsWithMetadata(property, value) {
     try {
         const accessToken = await getAccessToken();
-        const searchUrl = `${credentials.instancia_aem}/bin/querybuilder.json?path=/content/dam&type=dam:Asset&property=${propery}&property.value=${value}&p.limit=-1`;
+        const searchUrl = `${credentials.instancia_aem}/bin/querybuilder.json?path=/content/dam&type=dam:Asset&property=${property}&property.value=${value}&p.limit=-1`;
         const response = await axios.get(searchUrl, {
             headers: {
                 Authorization: `Bearer ${accessToken}`,
@@ -445,6 +445,25 @@ async function searchAssetsWithMetadata(propery, value) {
         console.error('Error al buscar el metadato:', error.response?.data || error.message);
         throw error;
     }  
+}
+
+async function getMetadataInAssets(path) {
+    try {
+        const accessToken = await getAccessToken();
+        const url = `${credentials.instancia_aem}/content/dam/${path}.infinity.json`;
+        const response = await axios.get(url, {
+            headers: {
+                Authorization: `Bearer ${accessToken}`
+            },
+        });
+        console.log('Assets en la ruta:', path, '\n', response.data);
+        return response.data;
+    } catch (error) {
+        if(error.response?.status === 404){
+            console.log('Ruta no encontrada:', path);
+            return;
+        }
+    }
 }
 
 
@@ -461,6 +480,8 @@ main().catch(console.error);
 // deleteAsset('integraciones', 'astronaut.png');
 // listAssetsInPath('integraciones/astronaut.png');
 // downloadAssetFromAEM('integraciones', 'astronaut.png', './' , 'pruebaNode.png');
-// updateImageMetadata('integraciones', 'astronaut.png', astronautMetadata);
+// updateImageMetadata('integraciones', 'earth.png', earthMetadata);
 // copyAndRenameAsset('integraciones/astronaut.png', 'integraciones', 'astronauta-copia.png', true);
 // searchAssetsWithMetadata('jcr:content/metadata/dc:title', 'Planeta Saturno');
+// getMetadataInAssets('integraciones/astronauta.png');
+
