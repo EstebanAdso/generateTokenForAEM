@@ -394,12 +394,12 @@ app.post('/api/upload/:targetFolder(*)', upload.array('files'), async (req, res)
 });
 
 // 4. Ruta para eliminar un asset
-app.delete('/api/assets/:path/:name', async (req, res) => {
+app.delete('/api/assets/:path(*)', async (req, res) => {
     try {
-        const { path: assetPath, name } = req.params;
+        const { path: assetPath } = req.params;
         
         const accessToken = await getAccessToken();
-        const deleteURL = `${credentials.instancia_aem}/api/assets/${assetPath}/${name}`;
+        const deleteURL = `${credentials.instancia_aem}/api/assets/${assetPath}`;
         
         const response = await axios.delete(deleteURL, {
             headers: {
