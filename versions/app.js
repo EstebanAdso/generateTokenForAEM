@@ -2,14 +2,73 @@ import 'dotenv/config';
 import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
-import credentials, { generateJWT, getAccessToken } from '../helpers/credentials.js';
+import jwt from 'jsonwebtoken';
 import { astronautMetadata, earthMetadata, marsMetadata } from '../helpers/metadata.js';
+
+
+// Configuración de credenciales
+const credentials = {
+    clientId: process.env.CLIENT_ID,
+    clientSecret: process.env.CLIENT_SECRET,
+    technicalAccountId: process.env.TECHNICAL_ACCOUNT_ID,
+    orgId: process.env.ORG_ID,
+    privateKey: process.env.PRIVATE_KEY,
+    imsEndpoint: process.env.IMS_ENDPOINT
+};
+const instancia_aem = process.env.INSTANCIA_AEM;
+
+// Generar JWT
+function generateJWT() {
+    const payload = {
+        exp: Math.floor(Date.now() / 1000) + 60 * 60, // 1 hora de expiración
+        iss: credentials.orgId,
+        sub: credentials.technicalAccountId,
+        aud: `${credentials.imsEndpoint}/c/${credentials.clientId}`,
+        "https://ims-na1.adobelogin.com/s/ent_aem_cloud_api": true
+    };
+
+    return jwt.sign(payload, credentials.privateKey, {
+        algorithm: 'RS256',
+        header: {
+            "cache-control": "no-cache",
+            "content-type": "application/x-www-form-urlencoded"
+        }
+    });
+}
+
+// Obtener access token
+async function getAccessToken() {
+    try {
+        const jwtToken = generateJWT();
+        // console.log('JWT Token:', '\n', jwtToken, '\n');
+
+        const response = await axios.post(
+            `${credentials.imsEndpoint}/ims/exchange/jwt`,
+            new URLSearchParams({
+                client_id: credentials.clientId,
+                client_secret: credentials.clientSecret,
+                jwt_token: jwtToken
+            }),
+            {
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                }
+            }
+        );
+
+        return response.data.access_token;
+
+    } catch (error) {
+        console.error('Error obteniendo token:', error.response?.data || error.message);
+        throw error;
+    }
+}
 
 // Función para crear carpeta
 async function createFolder(nombre, title, direccion) {
     try {
         const accessToken = await getAccessToken();
-        const aemURL = `${credentials.instancia_aem}/api/assets/${direccion}/*`;
+        const aemURL = `${instancia_aem}/api/assets/${direccion}/*`;
 
         const response = await axios.post(
             aemURL,
@@ -44,7 +103,7 @@ async function uploadImage(filePaths, targetFolder, options = {}) {
     try {
         // Convertir a array si es una sola ruta de archivo
         const files = Array.isArray(filePaths) ? filePaths : [filePaths];
-        
+
         // Verificar que todos los archivos existan
         for (const filePath of files) {
             if (!fs.existsSync(filePath)) {
@@ -98,14 +157,14 @@ async function uploadImage(filePaths, targetFolder, options = {}) {
 
 async function initiateMultiUpload(accessToken, filePaths, targetFolder) {
     try {
-        const initiateURL = `${credentials.instancia_aem}/content/dam/${targetFolder}.initiateUpload.json`;
-        
+        const initiateURL = `${instancia_aem}/content/dam/${targetFolder}.initiateUpload.json`;
+
         // Preparar los datos para la solicitud
         const formData = new URLSearchParams();
         filePaths.forEach((filePath, index) => {
             const fileName = path.basename(filePath);
             const fileSize = fs.statSync(filePath).size;
-            
+
             formData.append(`fileName`, fileName);
             formData.append(`fileSize`, fileSize.toString());
         });
@@ -205,8 +264,8 @@ async function uploadBinaryParts(filePath, uploadURIs, fileSize, minPartSize, ma
 
 // Función auxiliar para completar la subida de múltiples archivos
 async function completeMultiUpload(accessToken, completeURI, filesData) {
-    const completeURL = `${credentials.instancia_aem}${completeURI}`;
-    
+    const completeURL = `${instancia_aem}${completeURI}`;
+
     // Procesar cada archivo individualmente
     const results = [];
     for (const fileData of filesData) {
@@ -283,7 +342,7 @@ async function main() {
 async function deleteAsset(path, name) {
     try {
         const accessToken = await getAccessToken();
-        const deleteURL = `${credentials.instancia_aem}/api/assets/${path}/${name}`;
+        const deleteURL = `${instancia_aem}/api/assets/${path}/${name}`;
         const response = await axios.delete(deleteURL, {
             headers: {
                 Authorization: `Bearer ${accessToken}`
@@ -313,7 +372,7 @@ async function showToken() {
 async function listAssetsInPath(path) {
     try {
         const accessToken = await getAccessToken();
-        const listURL = `${credentials.instancia_aem}/api/assets/${path}.json`;
+        const listURL = `${instancia_aem}/api/assets/${path}.json`;
         const response = await axios.get(listURL, {
             headers: {
                 Authorization: `Bearer ${accessToken}`
@@ -322,7 +381,7 @@ async function listAssetsInPath(path) {
         console.log('Assets en la ruta:', path, '\n', response.data);
         return response.data;
     } catch (error) {
-        if(error.response?.status === 404){
+        if (error.response?.status === 404) {
             console.log('Ruta no encontrada:', path);
             return;
         }
@@ -332,46 +391,46 @@ async function listAssetsInPath(path) {
 // Función para descargar una imagen desde AEM
 async function downloadAssetFromAEM(aemPath, fileName, savePath, newFileName = fileName) {
     try {
-      const accessToken = await getAccessToken();
-      const downloadUrl = `${credentials.instancia_aem}/api/assets/${aemPath}/${fileName}/renditions/original`;
-  
-      const response = await axios.get(downloadUrl, {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'x-api-key': credentials.clientId
-        },
-        responseType: 'stream' // Para recibir el archivo como flujo de datos
-      });
-  
-      // Definir la ruta donde se guardará la imagen
-      const finalFileName = newFileName || fileName;
-      const filePath = path.join(savePath, finalFileName);
-  
-      // Guardar la imagen en la ruta especificada
-      const writer = fs.createWriteStream(filePath);
-      response.data.pipe(writer);
-  
-      // Esperar a que termine la escritura del archivo
-      await new Promise((resolve, reject) => {
-        writer.on('finish', resolve);
-        writer.on('error', reject);
-      });
-  
-      console.log(`Imagen descargada exitosamente en: ${filePath}`);
-      return filePath;
+        const accessToken = await getAccessToken();
+        const downloadUrl = `${instancia_aem}/api/assets/${aemPath}/${fileName}/renditions/original`;
+
+        const response = await axios.get(downloadUrl, {
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'x-api-key': credentials.clientId
+            },
+            responseType: 'stream' // Para recibir el archivo como flujo de datos
+        });
+
+        // Definir la ruta donde se guardará la imagen
+        const finalFileName = newFileName || fileName;
+        const filePath = path.join(savePath, finalFileName);
+
+        // Guardar la imagen en la ruta especificada
+        const writer = fs.createWriteStream(filePath);
+        response.data.pipe(writer);
+
+        // Esperar a que termine la escritura del archivo
+        await new Promise((resolve, reject) => {
+            writer.on('finish', resolve);
+            writer.on('error', reject);
+        });
+
+        console.log(`Imagen descargada exitosamente en: ${filePath}`);
+        return filePath;
     } catch (error) {
-        if(error.response?.status === 404){
-            console.log('Imagen no encontrada en la ruta: '+  aemPath)
+        if (error.response?.status === 404) {
+            console.log('Imagen no encontrada en la ruta: ' + aemPath)
             return
         }
     }
-  }
+}
 
 
-  // Función para actualizar los metadatos de una imagen en AEM
+// Función para actualizar los metadatos de una imagen en AEM
 async function updateImageMetadata(aemPath, fileName, metadata) {
     try {
-        const accessToken = await getAccessToken(); 
+        const accessToken = await getAccessToken();
         const updateUrl = `https://author-p129753-e1405052.adobeaemcloud.com/api/assets/${aemPath}/${fileName}`;
 
         const response = await axios.put(updateUrl, metadata, {
@@ -384,12 +443,12 @@ async function updateImageMetadata(aemPath, fileName, metadata) {
         console.log(`Metadatos actualizados exitosamente.`);
         return response.data;
     } catch (error) {
-        if(error.response?.status === 404){
-            console.log('Asset no encontrado en la ruta para actualizar: '+  aemPath)
+        if (error.response?.status === 404) {
+            console.log('Asset no encontrado en la ruta para actualizar: ' + aemPath)
             return
         }
-        if(error.response?.status === 423){
-            console.log('Asset bloqueado en la ruta para actualizar: '+  aemPath)
+        if (error.response?.status === 423) {
+            console.log('Asset bloqueado en la ruta para actualizar: ' + aemPath)
             return
         }
 
@@ -402,8 +461,8 @@ async function updateImageMetadata(aemPath, fileName, metadata) {
 async function copyAndRenameAsset(sourcePath, targetPath, newName, overwrite = false) {
     try {
         const accessToken = await getAccessToken();
-        const sourceUrl = `${credentials.instancia_aem}/api/assets/${sourcePath}`;
-        const destinationUrl = `${credentials.instancia_aem}/api/assets/${targetPath}/${newName}`;
+        const sourceUrl = `${instancia_aem}/api/assets/${sourcePath}`;
+        const destinationUrl = `${instancia_aem}/api/assets/${targetPath}/${newName}`;
 
         const response = await axios({
             method: 'COPY',
@@ -419,8 +478,8 @@ async function copyAndRenameAsset(sourcePath, targetPath, newName, overwrite = f
         console.log(`Asset copiado y renombrado exitosamente: ${sourcePath} -> ${targetPath}/${newName}`);
         return response.data;
     } catch (error) {
-        if(error.response?.status === 404){
-            console.log('Asset no encontrado en la ruta para copiar y renombrar: '+  sourcePath)
+        if (error.response?.status === 404) {
+            console.log('Asset no encontrado en la ruta para copiar y renombrar: ' + sourcePath)
             return
         }
 
@@ -432,7 +491,7 @@ async function copyAndRenameAsset(sourcePath, targetPath, newName, overwrite = f
 async function searchAssetsWithMetadata(property, value) {
     try {
         const accessToken = await getAccessToken();
-        const searchUrl = `${credentials.instancia_aem}/bin/querybuilder.json?path=/content/dam&type=dam:Asset&property=${property}&property.value=${value}&p.limit=-1`;
+        const searchUrl = `${instancia_aem}/bin/querybuilder.json?path=/content/dam&type=dam:Asset&property=${property}&property.value=${value}&p.limit=-1`;
         const response = await axios.get(searchUrl, {
             headers: {
                 Authorization: `Bearer ${accessToken}`,
@@ -444,13 +503,13 @@ async function searchAssetsWithMetadata(property, value) {
     } catch (error) {
         console.error('Error al buscar el metadato:', error.response?.data || error.message);
         throw error;
-    }  
+    }
 }
 
 async function getMetadataInAssets(path) {
     try {
         const accessToken = await getAccessToken();
-        const url = `${credentials.instancia_aem}/content/dam/${path}.infinity.json`;
+        const url = `${instancia_aem}/content/dam/${path}.infinity.json`;
         const response = await axios.get(url, {
             headers: {
                 Authorization: `Bearer ${accessToken}`
@@ -459,19 +518,157 @@ async function getMetadataInAssets(path) {
         console.log('Assets en la ruta:', path, '\n', response.data);
         return response.data;
     } catch (error) {
-        if(error.response?.status === 404){
+        if (error.response?.status === 404) {
             console.log('Ruta no encontrada:', path);
             return;
         }
     }
 }
 
+async function hibernateTest() {
+    try {
+        const accessToken = await getAccessToken();
+        const url = instancia_aem;
 
-main().catch(console.error);
+        const response = await axios.get(url, {
+            headers: {
+                Authorization: `Bearer ${accessToken}`
+            },
+        });
 
+        if (
+            typeof response.data === 'string' &&
+            (response.data.includes('healthy="hibernated"') || response.data.includes('<title>AEM Cloud Service</title>'))
+        ) {
+            console.log('🟡 AEM está en hibernación');
+            return true;
+        }
+        console.log('🟢 AEM está activo');
+        return false;
+    } catch (error) {
+        console.error('❌ Error al verificar AEM:', error.message);
+        return false;
+    }
+}
 
+export async function showMetadataSchemaRavel() {
+    try {
+      const accessToken = await getAccessToken();
+      const url = instancia_aem + '/conf/global/settings/dam/adminui-extension/metadataschema/ravel.infinity.json';
+  
+      const response = await axios(url, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'x-api-key': credentials.clientId
+        }
+      });
+  
+      let ravelMetadata = {};
+  
+      function extractRavelFields(obj) {
+        for (let key in obj) {
+          const node = obj[key];
+      
+          if (typeof node === 'object' && node !== null) {
+            // Detectar multifield con field interno (caso color)
+            const isMultiField = node.resourceType?.includes('multifield') &&
+                                 node.field?.name?.includes('ravel');
+      
+            if (isMultiField) {
+              const innerName = node.field.name;
+              const cleanName = innerName.split('ravel_')[1] || innerName;
+              const metaType = node['granite:data']?.metaType || 'unknown';
+              const label = node.fieldLabel || node.field?.fieldLabel || '';
+      
+              ravelMetadata[`_${cleanName}`] = {
+                label,
+                path: innerName,
+                type: metaType
+              };
+      
+              // 🔁 NO seguir con el subcampo `.field`, ya fue procesado
+              continue;
+            }
+      
+            // Normal
+            if (node.name && node.name.includes('ravel')) {
+              const cleanName = node.name.split('ravel_')[1] || node.name;
+              const metaType = node['granite:data']?.metaType || 'unknown';
+              const label = node.fieldLabel || node.text || '';
+      
+              // Evitar sobrescribir si ya se procesó (como en multifield)
+              if (!ravelMetadata[`_${cleanName}`]) {
+                let fieldData = {
+                  label,
+                  path: node.name,
+                  type: metaType
+                };
+      
+                if (metaType === 'dropdown' && node.items) {
+                  fieldData.options = Object.values(node.items)
+                    .filter(item => typeof item === 'object' && item.value)
+                    .map((item, index) => ({
+                      label: item.text || item.value,
+                      value: item.value,
+                      displayOrder: index + 1
+                    }));
+                }
+      
+                ravelMetadata[`_${cleanName}`] = fieldData;
+              }
+            }
+      
+            extractRavelFields(node, key);
+          }
+        }
+      }
+      
+      extractRavelFields(response.data);
+  
+      if (Object.keys(ravelMetadata).length === 0) {
+        console.log('No se encontraron campos ravel');
+        return false;
+      }
+  
+      console.log('Campos con ravel encontrados:', Object.keys(ravelMetadata).length);
+      console.log('Metadata Schema Ravel:', ravelMetadata);
+      return ravelMetadata;
+    } catch (error) {
+      console.error('Error al mostrar el metadata schema ravel:', error.message);
+      return false;
+    }
+  }
+  
+
+//Verificar si la carpeta tiene el esquema de Ravel
+export async function verifyFolderSchema(folderPath) {
+    try {
+        const accessToken = await getAccessToken();
+        const url = instancia_aem + '/content/dam/' + folderPath + '/jcr:content.json';
+        
+        const response = await axios(url, {
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+                'x-api-key': credentials.clientId
+            }
+        });
+        
+        // Verificar específicamente el metadataSchema
+        if(response.data.metadataSchema === '/conf/global/settings/dam/adminui-extension/metadataschema/ravel') {
+            console.log('La carpeta tiene el esquema de Ravel');
+            return true;
+        }
+        console.log(`La carpeta ${folderPath} no tiene el esquema de Ravel tiene: ${response.data.metadataSchema}`);
+        return false;
+    } catch (error) {
+        console.error('Error al verificar el esquema de la carpeta:', error.message);
+        return false;
+    }
+}
+
+// hibernateTest();
 // showToken();
-// createFolder('Prueba', 'Esta es la descripción realizada en js', 'integraciones');
+// createFolder('Prueba3', 'Esta es la descripción realizada en js', 'integraciones');
 // uploadImage('./images/astronaut.png', 'integraciones');
 // await uploadImage(
 //     ['./images/astronaut.png', './images/earth.png', './images/mars.png'],
@@ -484,4 +681,5 @@ main().catch(console.error);
 // copyAndRenameAsset('integraciones/astronaut.png', 'integraciones', 'astronauta-copia.png', true);
 // searchAssetsWithMetadata('jcr:content/metadata/dc:title', 'Planeta Saturno');
 // getMetadataInAssets('integraciones/astronauta.png');
-
+// showMetadataSchemaRavel();
+// verifyFolderSchema('integraciones');
